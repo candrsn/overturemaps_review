@@ -99,3 +99,26 @@
 * Places
 * Segments -
 * Connectors  - 2090100
+
+## Notes
+* pyarrow.lib.ArrowNotImplementedError: Not implemented type for Arrow list to pandas: map<string, string ('array_element')>
+
+* pyarrow.lib.ArrowNotImplementedError: Function 'dictionary_encode' has no kernel matching input types (map<string, list<array_element: map<string, string ('array_element')>> ('names'         
+        
+
+
+* "[('common', array([list([('value', 'Make a memory photobooth'), ('language', 'local')])],\n      dtype=object))]"
+
+
+names = [('common', array([list([('value', 'Fibras Capilares en Argentina'), ('language', 'local')])], dtype=object))]
+
+categories = {'main': 'beauty_salon', 'alternate': array(['health_and_medical', 'hospital'], dtype=object)}
+
+brand = {'names': None, 'wikidata': None}
+brand = {'names': [('brand_names_common', array([list([('value', 'コメリ'), ('language', 'local')])], dtype=object))], 'wikidata': None}
+
+addresses = [list([('locality', 'Ciudad de Buenos Aires'), ('postcode', '1431'), ('freeform', 'José Pascual Tamborini 5630'), ('region', 'C'), ('country', 'AR')])]
+
+sources = [list([('dataset', 'meta'), ('property', ''), ('recordid', '416537698693731')])]
+
+bbox = {'minx': -58.4976, 'maxx': -58.4976, 'miny': -34.56933, 'maxy': -34.56933}
