@@ -30,12 +30,12 @@ def add_geo(db, tbl, gtype='POINT'):
     db.enable_load_extension(False)
     cur = db.cursor()
 
-    cur.execute( f"""SELECT st_GeometryType(geomfromwkb(geometry)), count(*) FROM {tbl} GROUP BY 1""" )
+    cur.execute( f"""SELECT st_GeometryType(GeomFromWkb(geometry)), count(*) FROM {tbl} GROUP BY 1""" )
     res = cur.fetchall()
     g = [d[0].upper() for d in res]
     logger.info(f"db table {tbl} has geomtypes \n {res}")
     assert res[0][0].upper() in g, f"When adding to {tbl} mixed geometry types found {res[0][0]} when expected {gtype}"
- 
+
     cur.close()
     cmds = [
     f"""PRAGMA synchronous=0;""",
@@ -109,7 +109,7 @@ def check_output_status(dbpath):
 
 def read_pq(dbname, tbl, parquetfile, gtype, engine='pyarrow', force=False, config=None):
     mb = get_pq_members(parquetfile)
-    logger.info(f"reading {len(mb)} into {tbl}")
+    logger.info(f"reading {len(mb)} parquet files into {tbl}")
 
     ctr = 0
     for itm in mb:
@@ -161,7 +161,7 @@ def nd_multkey(data, tbl):
 def kvlist_dict(data):
     odata = {}
     for itm in data:
-       odata[itm[0]] = itm[1]    
+       odata[itm[0]] = itm[1]
 
     return odata
 
@@ -173,16 +173,11 @@ def pq_to_json(data, tbl, dcol, typeinfo):
     # some of these are stuctured maps as a handler for dicts
     stype = str(typeinfo.type)
 
-    if not (type(data) is list or isinstance(data, list) or type(data) is dict):
+    if not (type(data) is list or isinstance(data, list) or type(data) is dict or isinstance(data, numpy.ndarray)):
         if data is None:
             return data
         # skip simple types
         return data
-    elif dcol in ("socials", "sources", "phones"):
-        # simplified case to get to None
-        if data['names'] is None:
-            return data
-        ovals = data     
     elif stype == "struct<names: map<string, list<array_element: map<string, string ('array_element')>> ('names')>, wikidata: string>":
         # skip cases where all of the keys have None values
         kys = data.keys()
@@ -198,11 +193,14 @@ def pq_to_json(data, tbl, dcol, typeinfo):
                         qdata[topkey] = data[topkey]
                     else:
                         qdata[topkey] = kvlist_dict(data[topkey][0][1][0])
-            ovals = json.dumps(qdata)
+            if len(qdata.keys()) == 0:
+                ovals = None
+            else:
+                ovals = json.dumps(qdata)
     elif stype == 'struct<main: string, alternate: list<array_element: string>>':
         # skip cases where all of the keys have None values
         kys = data.keys()
-        # if none of the top level keys ad not None....
+        # if none of the top level keys are not None....
         if not True in [data[dk] is None for dk in kys]:
             ovals = None
         else:
@@ -215,6 +213,31 @@ def pq_to_json(data, tbl, dcol, typeinfo):
                     else:
                         qdata[topkey] == ""
             ovals = json.dumps(qdata)
+    elif stype == "map<string, list<array_element: map<string, string ('array_element')>> ('names')>":
+        qdata = {}
+        for q in data:
+            qxdata = {}
+            for qx in q[1][0]:
+                qxdata[qx[0]] = qx[1]
+            qdata[q[0]] = qxdata
+        if len(qdata.keys()) == 0:
+            ovals = None
+        else:
+            ovals = json.dumps(qdata)
+    elif stype == "list<array_element: map<string, string ('array_element')>>":
+        qdata = {}
+        for q in data[0]:
+            qdata[q[0]] = q[1]
+        
+        if len(qdata.keys()) == 0:
+            ovals = None
+        else:
+            ovals = json.dumps(qdata)
+    elif dcol in ("socials", "phones"):
+        # simplified case to get to None
+        if data.get('names') is None:
+            return data
+        ovals = data
     elif dcol == "addresses":
         if data["alternate"] is None:
             ovals = json.dumps(data)
@@ -289,8 +312,8 @@ def save_pq_frame(db, tbl, df, colmap=None, schema=None, convtype="JSON", engine
         # flatten the list columns
         for litm in df.columns:
 
-                if (not isinstance(df.dtypes[litm], object)) or litm in ('id', 'updatetime', 'version', 'confidence', 'level', 'geometry'):
-                    #skip processing certain named columns
+                if (not isinstance(df.dtypes[litm], object)) or litm in ('id', 'updatetime', 'version', 'confidence', 'level', 'height', 'numfloors', 'geometry'):
+                    # skip processing certain named columns
                     # and simple columns
                     continue
 
@@ -306,7 +329,8 @@ def save_pq_frame(db, tbl, df, colmap=None, schema=None, convtype="JSON", engine
                 logger.debug(f"Column {litm} in {tbl} is {stype.type}")
 
                 if convtype == "JSON":
-                    df[litm] = df[litm].apply(lambda x: pq_to_json(x, tbl, litm, stype) if isinstance(x, list) or isinstance(x, dict) else str(x))
+                    #df[litm] = df[litm].apply(lambda x: pq_to_json(x, tbl, litm, stype) if isinstance(x, list) or isinstance(x, dict) else str(x))
+                    df[litm] = df[litm].apply(lambda x: pq_to_json(x, tbl, litm, stype) if isinstance(x, list) or isinstance(x, dict) or isinstance(x, object) else str(x))
                 elif convtype == "string":
                     # convert the KEY Mapped data to string representation using the shallow method
                     df[litm] = df[litm].apply(lambda x: str(x) if isinstance(x, list) or isinstance(x, dict) else str(x))
@@ -378,7 +402,7 @@ def read_pq_members_fastparquet(db, tbl, pqm):
     coltypes = {k: str for k in idf.columns}
     # reopen the file declaring the expected dtypes
     idf = ppq.ParquetFile(pqm, dtypes=coltypes)
-    
+
     colmap = None
 
     logger.info(f"parquet file: {pqm}")
@@ -437,7 +461,7 @@ def parquet_info_pyarrow(pqm):
                     "compression": 1.0
                     })
 
-    return {"file": pqm, 
+    return {"file": pqm,
             "rows": idf.metadata.num_rows,
             "row_groups": idf.metadata.num_row_groups,
             "rg_info": data
@@ -459,7 +483,7 @@ def parquet_info(pqm):
                     "compression": (rg.total_compressed_size/rg.total_byte_size)
                     })
 
-    return {"file": pqm, 
+    return {"file": pqm,
             "rows": idf.info["rows"],
             "row_groups": idf.info['row_groups'],
             "rg_info": data
@@ -491,7 +515,7 @@ def get_theme_status(thm):
 
     if not os.path.exists(dbx):
         return False
-    
+
     return True
 
 
